@@ -56,6 +56,7 @@ typedef struct {
 			int smn_fd;
 			int pm_table_fd;
 			size_t pm_table_size;
+			uint32_t pm_table_version;
 		} kmod;
 	} access;
 #endif

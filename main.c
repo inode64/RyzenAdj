@@ -76,7 +76,7 @@ static const char *family_name(enum ryzen_family fam)
 		case FAM_REMBRANDT: return "Rembrandt";
 		case FAM_PHOENIX: return "Phoenix Point";
 		case FAM_HAWKPOINT: return "Hawk Point";
-		case FAM_DRAGONRANGE: return "Dragon Range";
+		case FAM_DRAGONRANGE: return "Raphael / Dragon Range";
 		case FAM_KRACKANPOINT: return "Krackan Point";
 		case FAM_STRIXPOINT: return "Strix Point";
 		case FAM_STRIXHALO: return "Strix Halo";
@@ -87,10 +87,21 @@ static const char *family_name(enum ryzen_family fam)
 	return "Unknown";
 }
 
+static void print_info_value_if_valid(const char *tableFormat, const char *name, float value, const char *parameter)
+{
+	if (value == value)
+		printf(tableFormat, name, value, parameter);
+}
+
 static void show_info_header(ryzen_access ry)
 {
 	printf("CPU Family: %s\n", family_name(get_cpu_family(ry)));
 	printf("SMU BIOS Interface Version: %d\n", get_bios_if_ver(ry));
+	unsigned int smufw = get_smu_version(ry);
+	if ((smufw >> 24) & 0xff)
+		printf("SMU FW Version: %d.%d.%d.%d\n", (smufw >> 24) & 0xff, (smufw >> 16) & 0xff, (smufw >> 8) & 0xff, smufw & 0xff);
+	else
+		printf("SMU FW Version: %d.%d.%d\n", (smufw >> 16) & 0xff, (smufw >> 8) & 0xff, smufw & 0xff);
 	printf("Version: v" STRINGIFY(RYZENADJ_REVISION_VER) "." STRINGIFY(RYZENADJ_MAJOR_VER) "." STRINGIFY(RYZENADJ_MINIOR_VER) " \n");
 }
 
@@ -127,6 +138,8 @@ static void show_info_table(ryzen_access ry)
 	printf(tableFormat, "EDC VALUE VDD", get_vrmmax_current_value(ry), "");
 	printf(tableFormat, "EDC LIMIT SOC", get_vrmsocmax_current(ry), "vrmsocmax-current");
 	printf(tableFormat, "EDC VALUE SOC", get_vrmsocmax_current_value(ry), "");
+	print_info_value_if_valid(tableFormat, "PSI0 CURRENT", get_psi0_current(ry), "psi0-current");
+	print_info_value_if_valid(tableFormat, "PSI0 SOC CURRENT", get_psi0soc_current(ry), "psi0soc-current");
 	printf(tableFormat, "THM LIMIT CORE", get_tctl_temp(ry), "tctl-temp");
 	printf(tableFormat, "THM VALUE CORE", get_tctl_temp_value(ry), "");
 	printf(tableFormat, "STT LIMIT APU", get_apu_skin_temp_limit(ry), "apu-skin-temp");
@@ -135,6 +148,70 @@ static void show_info_table(ryzen_access ry)
 	printf(tableFormat, "STT VALUE dGPU", get_dgpu_skin_temp_value(ry), "");
 	printf(tableFormat, "CCLK Boost SETPOINT", get_cclk_setpoint(ry), "power-saving /");
 	printf(tableFormat, "CCLK BUSY VALUE", get_cclk_busy_value(ry), "max-performance");
+	print_info_value_if_valid(tableFormat, "SOCKET POWER", get_socket_power(ry), "");
+	print_info_value_if_valid(tableFormat, "SOC POWER", get_soc_power(ry), "");
+	print_info_value_if_valid(tableFormat, "SOC VOLT", get_soc_volt(ry), "");
+	print_info_value_if_valid(tableFormat, "GFX CLK (MHz)", get_gfx_clk(ry), "");
+	print_info_value_if_valid(tableFormat, "GFX VOLT", get_gfx_volt(ry), "");
+	print_info_value_if_valid(tableFormat, "GFX TEMP", get_gfx_temp(ry), "");
+	print_info_value_if_valid(tableFormat, "L3 CLK (MHz)", get_l3_clk(ry), "");
+	print_info_value_if_valid(tableFormat, "L3 LOGIC", get_l3_logic(ry), "");
+	print_info_value_if_valid(tableFormat, "L3 VDDM", get_l3_vddm(ry), "");
+	print_info_value_if_valid(tableFormat, "L3 TEMP", get_l3_temp(ry), "");
+	print_info_value_if_valid(tableFormat, "FCLK (MHz)", get_fclk(ry), "");
+	print_info_value_if_valid(tableFormat, "MEM CLK (MHz)", get_mem_clk(ry), "");
+
+	//per-core detail: power/volt/temp/reported clock plus effective clock and
+	//C-state residency (effective clock and residencies are new metrics)
+	{
+		//the per-core arrays hold 8 entries (one CCD); iterating past that would
+		//read into the next array, so cap at 8. Disabled cores read 0 and are skipped.
+		int core, printed_any = 0, has_freqeff = 0, has_c0 = 0, has_cc1 = 0, has_c6 = 0;
+		float power[8], volt[8], temp[8], clk[8], freqeff[8], c0[8], cc1[8], c6[8];
+
+		for (core = 0; core < 8; core++) {
+			power[core] = get_core_power(ry, core);
+			if (!(power[core] > 0.0f))
+				continue; //skip disabled/absent cores (0W) and unsupported tables (nan)
+			volt[core] = get_core_volt(ry, core);
+			temp[core] = get_core_temp(ry, core);
+			clk[core] = get_core_clk(ry, core);
+			freqeff[core] = get_core_freqeff(ry, core);
+			c0[core] = get_core_c0(ry, core);
+			cc1[core] = get_core_cc1(ry, core);
+			c6[core] = get_core_cc6(ry, core);
+			has_freqeff |= (freqeff[core] == freqeff[core]);
+			has_c0 |= (c0[core] == c0[core]);
+			has_cc1 |= (cc1[core] == cc1[core]);
+			has_c6 |= (c6[core] == c6[core]);
+			printed_any = 1;
+		}
+		if (printed_any) {
+			printf("\n| Core | Power(W) | Volt(V) | Temp(C) | Freq(GHz) |");
+			if (has_freqeff) printf(" FreqEff |");
+			if (has_c0) printf(" C0%%  |");
+			if (has_cc1) printf(" CC1%% |");
+			if (has_c6) printf(" C6%%  |");
+			printf("\n|------|----------|---------|---------|-----------|");
+			if (has_freqeff) printf("---------|");
+			if (has_c0) printf("------|");
+			if (has_cc1) printf("------|");
+			if (has_c6) printf("------|");
+			printf("\n");
+
+			for (core = 0; core < 8; core++) {
+				if (!(power[core] > 0.0f))
+					continue;
+				printf("| %4d | %8.3f | %7.3f | %7.1f | %9.3f |",
+					core, power[core], volt[core], temp[core], clk[core]);
+				if (has_freqeff) printf(" %7.3f |", freqeff[core]);
+				if (has_c0) printf(" %4.0f |", c0[core]);
+				if (has_cc1) printf(" %4.0f |", cc1[core]);
+				if (has_c6) printf(" %4.0f |", c6[core]);
+				printf("\n");
+			}
+		}
+	}
 }
 
 static void show_table_dump(ryzen_access ry, int any_adjust_applied)

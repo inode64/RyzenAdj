@@ -86,6 +86,17 @@ EXP int get_bios_if_ver(ryzen_access ry)
 	return ry->bios_if_ver;
 }
 
+EXP unsigned int get_smu_version(ryzen_access ry)
+{
+	// OP 0x02 (with arg0=1) returns the SMU firmware version. Unlike the BIOS
+	// interface version query (msg 0x3, which returns 0 on desktop Raphael /
+	// Dragon Range), this message works across all platforms. The result is
+	// packed one byte per field: 0x04540400 -> 4.84.4.0.
+	smu_service_args_t args = {1, 0, 0, 0, 0, 0};
+	smu_service_req(ry->mp1_smu, 0x2, &args);
+	return args.arg0;
+}
+
 #define _return_translated_smu_error(SMU_RESP)                              \
 do {                                                                        \
 	if (SMU_RESP == REP_MSG_UnknownCmd) {                                   \
@@ -128,6 +139,21 @@ static int request_table_ver_and_size(ryzen_access ry) {
 			get_table_ver_msg = 0x6;
 			break;
 		default:
+#ifndef _WIN32
+			// Desktop Raphael / Dragon Range (Ryzen 7000) have no known "get PM
+			// table version" SMU message, but the ryzen_smu kernel module already
+			// exposes the version and size through sysfs. Trust those, consistent
+			// with init_table() which already prefers the kmod-reported size.
+			if (is_using_smu_driver()) {
+				ry->table_ver = ry->os_access->access.kmod.pm_table_version;
+				ry->table_size = ry->os_access->access.kmod.pm_table_size;
+				if (!ry->table_ver) {
+					printf("ryzen_smu did not report a PM table version\n");
+					return ADJ_ERR_SMU_UNSUPPORTED;
+				}
+				return 0;
+			}
+#endif
 			printf("request_table_ver_and_size is not supported on this family\n");
 			return ADJ_ERR_FAM_UNSUPPORTED;
 	}
@@ -209,6 +235,15 @@ static int request_table_addr(ryzen_access ry)
 		get_table_addr_msg = 0x66;
 		break;
 	default:
+#ifndef _WIN32
+		// In ryzen_smu kernel-module mode the PM table is read straight from
+		// sysfs (copy_pm_table_kmod), so its physical address is never needed
+		// and init_mem_obj_kmod() ignores it.
+		if (is_using_smu_driver()) {
+			ry->table_addr = 0;
+			return 0;
+		}
+#endif
 		printf("request_table_addr is not supported on this family\n");
 		return ADJ_ERR_FAM_UNSUPPORTED;
 	}
@@ -329,7 +364,13 @@ EXP int CALL init_table(ryzen_access ry)
 		return errorcode;
 	}
 
-	if(!ry->table_values[0]){
+	//On the Raphael / Dragon Range 0x540104 table, offset 0x0 is legitimately always
+	//zero, so table_values[0] would flag every init as "empty" and force a needless
+	//retry. Use offset 0x8 (fast PPT limit, nonzero when populated) for it.
+	int table_empty = (ry->table_ver == 0x00540104)
+		? !ry->table_values[0x8 / 4]
+		: !ry->table_values[0];
+	if(table_empty){
 		//Raven and Picasso don't get table refresh on the very first transfer call after boot, but respond with OK
 		//if we detact 0 data, do an initial 2nd call after a small delay
 		//transfer, transfer, wait, wait longer; don't work
@@ -1467,12 +1508,15 @@ EXP int CALL set_cogfx(ryzen_access ry, uint32_t value) {
 }
 
 //PM Table section, offset of first lines are stable across multiple PM Table versions
-EXP float CALL get_stapm_limit(ryzen_access ry){_read_float_value(0x0);}
-EXP float CALL get_stapm_value(ryzen_access ry){_read_float_value(0x4);}
+// The "stable prefix" below mostly does NOT hold for desktop Raphael / Dragon
+// Range (table 0x540104). The fast PPT limit is still at 0x8, while STAPM and
+// slow PPT are not confirmed there; keep them hidden until located.
+EXP float CALL get_stapm_limit(ryzen_access ry){if(ry->table_ver==0x00540104)return NAN;_read_float_value(0x0);}
+EXP float CALL get_stapm_value(ryzen_access ry){if(ry->table_ver==0x00540104)return NAN;_read_float_value(0x4);}
 EXP float CALL get_fast_limit(ryzen_access ry){_read_float_value(0x8);}
 EXP float CALL get_fast_value(ryzen_access ry){_read_float_value(0xC);}
-EXP float CALL get_slow_limit(ryzen_access ry){_read_float_value(0x10);}
-EXP float CALL get_slow_value(ryzen_access ry){_read_float_value(0x14);}
+EXP float CALL get_slow_limit(ryzen_access ry){if(ry->table_ver==0x00540104)return NAN;_read_float_value(0x10);}
+EXP float CALL get_slow_value(ryzen_access ry){if(ry->table_ver==0x00540104)return NAN;_read_float_value(0x14);}
 
 //custom section, offsets are depending on table version
 EXP float CALL get_apu_slow_limit(ryzen_access ry) {
@@ -1538,6 +1582,17 @@ EXP float CALL get_apu_slow_value(ryzen_access ry) {
 	return NAN;
 }
 EXP float CALL get_vrm_current(ryzen_access ry) {
+	if (ry->table_ver == 0x00540104) {
+		// Raphael / Dragon Range / EPYC 4004: some boards expose a real TDC
+		// limit at 0x20 (75A on EPYC 4344P). Others report 1000A here, which is
+		// effectively an unlimited/sentinel value, so keep those hidden.
+		if (!ry->table_values)
+			return NAN;
+		float value = ry->table_values[0x20 / 4];
+		if (value > 0.0f && value <= 500.0f)
+			return value;
+		return NAN;
+	}
 	switch (ry->table_ver)
 	{
 	case 0x001E0001:
@@ -1577,6 +1632,8 @@ EXP float CALL get_vrm_current(ryzen_access ry) {
 	return NAN;
 }
 EXP float CALL get_vrm_current_value(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): TDC, current pulled from the VDD rail (A)
+	if (ry->table_ver == 0x00540104) { _read_float_value(0x50); }
 	switch (ry->table_ver)
 	{
 	case 0x001E0001:
@@ -1694,6 +1751,16 @@ EXP float CALL get_vrmsoc_current_value(ryzen_access ry) {
 	return NAN;
 }
 EXP float CALL get_vrmmax_current(ryzen_access ry) {
+	if (ry->table_ver == 0x00540104) {
+		// EPYC 4004 exposes the EDC limit at 0xF4. As with the TDC limit,
+		// desktop/mobile dumps can carry a 1000A sentinel here.
+		if (!ry->table_values)
+			return NAN;
+		float value = ry->table_values[0xF4 / 4];
+		if (value > 0.0f && value <= 500.0f)
+			return value;
+		return NAN;
+	}
 	switch (ry->table_ver)
 	{
 	case 0x001E0001:
@@ -1850,6 +1917,10 @@ EXP float CALL get_vrmsocmax_current_value(ryzen_access ry) {
 	return NAN;
 }
 EXP float CALL get_tctl_temp(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): THM limit (Tctl throttle target, C).
+	// Confirmed: constant 80 across dumps while the value at 0x2C rises to ~81
+	// under load and holds there (thermal-limited), i.e. a configured 80C cap.
+	if (ry->table_ver == 0x00540104) { _read_float_value(0x28); }
 	switch (ry->table_ver)
 	{
 	case 0x001E0001:
@@ -1890,6 +1961,34 @@ EXP float CALL get_tctl_temp(ryzen_access ry) {
 	return NAN;
 }
 EXP float CALL get_tctl_temp_value(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): CPU control temperature Tctl (C)
+	if (ry->table_ver == 0x00540104) {
+		if (!ry->table_values)
+			return NAN;
+		float value = ry->table_values[0x2C / 4];
+		float alternate = ry->table_values[0xF8 / 4];
+		// 0x2C tracks Tctl on Dragon Range/Raphael laptops/desktops. EPYC 4004
+		// uses 0xF8 under load, matching k10temp/Tccd. Pick the higher plausible
+		// temperature so both layouts report the active control temperature.
+		if (alternate > value && alternate < 130.0f)
+			value = alternate;
+		return value;
+	}
+	if (ry->table_ver == 0x001E0004) {
+		// Picasso 0x1e0004 has a later per-core temperature block that tracks
+		// k10temp/TSI0. Return the hottest core as the package control temp.
+		int core;
+		float value;
+		if (!ry->table_values)
+			return NAN;
+		value = ry->table_values[0x624 / 4];
+		for (core = 1; core < 4; core++) {
+			float core_temp = ry->table_values[(0x624 + (core * 4)) / 4];
+			if (core_temp > value)
+				value = core_temp;
+		}
+		return value;
+	}
 	switch (ry->table_ver)
 	{
 	case 0x001E0001:
@@ -2325,6 +2424,11 @@ EXP float CALL get_core_power(ryzen_access ry, uint32_t core) {
 		case 0x00400005:
 			baseOffset = 0x320;
 			break;
+		case 0x001E0004: // Picasso, 4 physical cores
+			if (core >= 4)
+				return NAN;
+			baseOffset = 0x180;
+			break;
 		case 0x005D0008: // Strix Point - manufacturer-disabled cores are 0W (12 cores in total)
 		case 0x005D0009:
 	case 0x005D000B:
@@ -2332,6 +2436,9 @@ EXP float CALL get_core_power(ryzen_access ry, uint32_t core) {
 			break;
 		case 0x0064020c: // Strix Halo
 			baseOffset = 0xB90;
+			break;
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000), 6/8-core CCD
+			baseOffset = 0x494;
 			break;
 		default:
 			return NAN;
@@ -2368,6 +2475,11 @@ EXP float CALL get_core_volt(ryzen_access ry, uint32_t core) {
 		case 0x00400005:
 			baseOffset = 0x340;
 			break;
+		case 0x001E0004: // Picasso, 4 physical cores
+			if (core >= 4)
+				return NAN;
+			baseOffset = 0x1A0;
+			break;
 		case 0x005D0008: // Strix Point - manufacturer-disabled cores are 0V
 		case 0x005D0009:
 	case 0x005D000B:
@@ -2375,6 +2487,9 @@ EXP float CALL get_core_volt(ryzen_access ry, uint32_t core) {
 			break;
 		case 0x0064020c: // Strix Halo
 			baseOffset = 0xBD0;
+			break;
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x4B4;
 			break;
 		default:
 			return NAN;
@@ -2411,6 +2526,11 @@ EXP float CALL get_core_temp(ryzen_access ry, uint32_t core) {
 		case 0x00400005:
 			baseOffset = 0x360;
 			break;
+		case 0x001E0004: // Picasso, 4 physical cores
+			if (core >= 4)
+				return NAN;
+			baseOffset = 0x624;
+			break;
 		case 0x005D0008: // Strix Point - manufacturer-disabled cores also have temp collected
 		case 0x005D0009:
 	case 0x005D000B:
@@ -2418,6 +2538,9 @@ EXP float CALL get_core_temp(ryzen_access ry, uint32_t core) {
 			break;
 		case 0x0064020c: // Strix Halo
 			baseOffset = 0xC10;
+			break;
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x4D4;
 			break;
 		default:
 			return NAN;
@@ -2429,6 +2552,14 @@ EXP float CALL get_core_temp(ryzen_access ry, uint32_t core) {
 EXP float CALL get_core_clk(ryzen_access ry, uint32_t core) {
 	if (core > 15)
 		return NAN;
+
+	if (ry->table_ver == 0x001E0004) {
+		// Picasso reports the sampled core clock in MHz; RyzenAdj's per-core
+		// clock getters use GHz in the CLI table.
+		if (core >= 4 || !ry->table_values)
+			return NAN;
+		return ry->table_values[(0x1C0 + (core * 4)) / 4] / 1000.0f;
+	}
 
 	uint32_t baseOffset;
 
@@ -2461,6 +2592,78 @@ EXP float CALL get_core_clk(ryzen_access ry, uint32_t core) {
 			break;
 		case 0x0064020c:
 			baseOffset = 0xc50;
+			break;
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x4F4;
+			break;
+		default:
+			return NAN;
+	}
+
+	_read_float_value(baseOffset + (core * 4));
+}
+
+// Effective (achieved) per-core clock in GHz. New metric: RyzenAdj historically
+// only exposed the requested clock via get_core_clk.
+EXP float CALL get_core_freqeff(ryzen_access ry, uint32_t core) {
+	if (core > 15)
+		return NAN;
+
+	uint32_t baseOffset;
+	switch (ry->table_ver) {
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x514;
+			break;
+		default:
+			return NAN;
+	}
+
+	_read_float_value(baseOffset + (core * 4));
+}
+
+// Per-core C0 residency (% of time the core was active). New metric.
+EXP float CALL get_core_c0(ryzen_access ry, uint32_t core) {
+	if (core > 15)
+		return NAN;
+
+	uint32_t baseOffset;
+	switch (ry->table_ver) {
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x534;
+			break;
+		default:
+			return NAN;
+	}
+
+	_read_float_value(baseOffset + (core * 4));
+}
+
+// Per-core CC1 residency (% of time in the CC1 shallow sleep state). New metric.
+EXP float CALL get_core_cc1(ryzen_access ry, uint32_t core) {
+	if (core > 15)
+		return NAN;
+
+	uint32_t baseOffset;
+	switch (ry->table_ver) {
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x554;
+			break;
+		default:
+			return NAN;
+	}
+
+	_read_float_value(baseOffset + (core * 4));
+}
+
+// Per-core CC6 residency (% of time in the CC6 deep sleep state). New metric.
+EXP float CALL get_core_cc6(ryzen_access ry, uint32_t core) {
+	if (core > 15)
+		return NAN;
+
+	uint32_t baseOffset;
+	switch (ry->table_ver) {
+		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
+			baseOffset = 0x574;
 			break;
 		default:
 			return NAN;
@@ -2558,6 +2761,7 @@ EXP float CALL get_l3_temp(ryzen_access ry) {
 }
 
 EXP float CALL get_gfx_clk(ryzen_access ry) {
+	if (ry->table_ver == 0x001E0004) { _read_float_value(0x2DC); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -2666,6 +2870,8 @@ EXP float CALL get_gfx_temp(ryzen_access ry) {
 }
 
 EXP float CALL get_fclk(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): Infinity Fabric clock (MHz)
+	if (ry->table_ver == 0x00540104) { _read_float_value(0x1A4); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -2721,6 +2927,9 @@ EXP float CALL get_fclk(ryzen_access ry) {
 }
 
 EXP float CALL get_mem_clk(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): memory clock (MHz)
+	if (ry->table_ver == 0x00540104) { _read_float_value(0x1D4); }
+	if (ry->table_ver == 0x001E0004) { _read_float_value(0x298); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -2747,6 +2956,10 @@ EXP float CALL get_mem_clk(ryzen_access ry) {
 }
 
 EXP float CALL get_soc_volt(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): SoC-domain voltage (~1.1V on DDR5). Best
+	// effort: this ~1.1V rail is stable idle-vs-load; it may be VDDCR_SOC or the
+	// coupled memory voltage, but the reading is a valid SoC-domain voltage.
+	if (ry->table_ver == 0x00540104) { _read_float_value(0xE0); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -2792,6 +3005,8 @@ EXP float CALL get_soc_power(ryzen_access ry) {
 }
 
 EXP float CALL get_socket_power(ryzen_access ry) {
+	// Raphael / Dragon Range (0x540104): whole-socket power (W)
+	if (ry->table_ver == 0x00540104) { _read_float_value(0x68); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:

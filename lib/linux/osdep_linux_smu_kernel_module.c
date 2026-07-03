@@ -25,6 +25,23 @@ static uint32_t get_pm_table_size() {
 	return table_sz;
 }
 
+static uint32_t get_pm_table_version() {
+	const int fd = open("/sys/kernel/ryzen_smu_drv/pm_table_version", O_RDONLY);
+	uint32_t table_ver = 0;
+
+	if (fd == -1)
+		return 0;
+
+	if (read(fd, &table_ver, sizeof(table_ver)) == -1) {
+		DBG("failed to retrieve PM table version: %s\n", strerror(errno));
+		close(fd);
+		return 0;
+	}
+
+	close(fd);
+	return table_ver;
+}
+
 os_access_obj_t *init_os_access_obj_kmod() {
 	os_access_obj_t *obj = malloc(sizeof(os_access_obj_t));
 
@@ -36,6 +53,8 @@ os_access_obj_t *init_os_access_obj_kmod() {
 	obj->access.kmod.pm_table_size = get_pm_table_size();
 	if (obj->access.kmod.pm_table_size == -1)
 		goto err_exit;
+
+	obj->access.kmod.pm_table_version = get_pm_table_version();
 
 	obj->access.kmod.smn_fd = open("/sys/kernel/ryzen_smu_drv/smn", O_RDWR);
 	if (obj->access.kmod.smn_fd == -1) {

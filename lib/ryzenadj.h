@@ -72,6 +72,11 @@ EXP void CALL cleanup_ryzenadj(ryzen_access ry);
 
 EXP enum ryzen_family get_cpu_family(ryzen_access ry);
 EXP int get_bios_if_ver(ryzen_access ry);
+EXP unsigned int get_smu_version(ryzen_access ry);
+EXP float CALL get_core_freqeff(ryzen_access ry, uint32_t core);
+EXP float CALL get_core_c0(ryzen_access ry, uint32_t core);
+EXP float CALL get_core_cc1(ryzen_access ry, uint32_t core);
+EXP float CALL get_core_cc6(ryzen_access ry, uint32_t core);
 
 EXP int CALL init_table(ryzen_access ry);
 EXP uint32_t CALL get_table_ver(ryzen_access ry);
