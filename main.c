@@ -11,6 +11,8 @@
 #define STRINGIFY2(X) #X
 #define STRINGIFY(X) STRINGIFY2(X)
 
+#define MAX_INFO_CORES 16
+
 #define _do_adjust(ARG) \
 do {                                                                              \
 	/* ignore max unsigned integer values */                                      \
@@ -73,7 +75,9 @@ static const char *family_name(enum ryzen_family fam)
 		case FAM_DALI: return "Dali";
 		case FAM_LUCIENNE: return "Lucienne";
 		case FAM_VANGOGH: return "Vangogh";
+		case FAM_MATISSE: return "Matisse";
 		case FAM_REMBRANDT: return "Rembrandt";
+		case FAM_MENDOCINO: return "Mendocino";
 		case FAM_PHOENIX: return "Phoenix Point";
 		case FAM_HAWKPOINT: return "Hawk Point";
 		case FAM_DRAGONRANGE: return "Raphael / Dragon Range";
@@ -91,6 +95,31 @@ static void print_info_value_if_valid(const char *tableFormat, const char *name,
 {
 	if (value == value)
 		printf(tableFormat, name, value, parameter);
+}
+
+static int info_core_count(ryzen_access ry)
+{
+	switch (get_table_ver(ry)) {
+		case 0x00540004:
+		case 0x00620205:
+			return 16;
+		case 0x005D0008:
+		case 0x005D0009:
+		case 0x005D000B:
+			return 12;
+		case 0x0064020c:
+			return 16;
+		default:
+			return 8;
+	}
+}
+
+static int info_core_values_valid(float power, float volt, float temp, float clk)
+{
+	return power == power && power > 0.0f && power < 300.0f &&
+	       volt == volt && volt > 0.0f && volt < 2.0f &&
+	       temp == temp && temp > 0.0f && temp < 130.0f &&
+	       clk == clk && clk > 0.0f && clk < 10.0f;
 }
 
 static void show_info_header(ryzen_access ry)
@@ -159,17 +188,27 @@ static void show_info_table(ryzen_access ry)
 	print_info_value_if_valid(tableFormat, "L3 VDDM", get_l3_vddm(ry), "");
 	print_info_value_if_valid(tableFormat, "L3 TEMP", get_l3_temp(ry), "");
 	print_info_value_if_valid(tableFormat, "FCLK (MHz)", get_fclk(ry), "");
-	print_info_value_if_valid(tableFormat, "MEM CLK (MHz)", get_mem_clk(ry), "");
+	float uclk = get_uclk(ry);
+	if (uclk == uclk)
+		print_info_value_if_valid(tableFormat, "UCLK (MHz)", uclk, "");
+	else
+		print_info_value_if_valid(tableFormat, "MEM CLK (MHz)", get_mem_clk(ry), "");
+	print_info_value_if_valid(tableFormat, "MEM PHY CLK (MHz)", get_mem_phy_clk(ry), "");
+	print_info_value_if_valid(tableFormat, "MEM RATE (MT/s)", get_mem_transfer_rate(ry), "");
+	print_info_value_if_valid(tableFormat, "VCLK (MHz)", get_vclk(ry), "");
+	print_info_value_if_valid(tableFormat, "SOCCLK (MHz)", get_socclk(ry), "");
+	print_info_value_if_valid(tableFormat, "MPIPU CLK (MHz)", get_mpipu_clk(ry), "");
+	print_info_value_if_valid(tableFormat, "IPU CLK (MHz)", get_ipu_clk(ry), "");
 
 	//per-core detail: power/volt/temp/reported clock plus effective clock and
 	//C-state residency (effective clock and residencies are new metrics)
 	{
-		//the per-core arrays hold 8 entries (one CCD); iterating past that would
-		//read into the next array, so cap at 8. Disabled cores read 0 and are skipped.
 		int core, printed_any = 0, has_freqeff = 0, has_c0 = 0, has_cc1 = 0, has_c6 = 0;
-		float power[8], volt[8], temp[8], clk[8], freqeff[8], c0[8], cc1[8], c6[8];
+		int core_count = info_core_count(ry);
+		float power[MAX_INFO_CORES], volt[MAX_INFO_CORES], temp[MAX_INFO_CORES], clk[MAX_INFO_CORES];
+		float freqeff[MAX_INFO_CORES], c0[MAX_INFO_CORES], cc1[MAX_INFO_CORES], c6[MAX_INFO_CORES];
 
-		for (core = 0; core < 8; core++) {
+		for (core = 0; core < core_count; core++) {
 			power[core] = get_core_power(ry, core);
 			if (!(power[core] > 0.0f))
 				continue; //skip disabled/absent cores (0W) and unsupported tables (nan)
@@ -180,6 +219,8 @@ static void show_info_table(ryzen_access ry)
 			c0[core] = get_core_c0(ry, core);
 			cc1[core] = get_core_cc1(ry, core);
 			c6[core] = get_core_cc6(ry, core);
+			if (!info_core_values_valid(power[core], volt[core], temp[core], clk[core]))
+				continue;
 			has_freqeff |= (freqeff[core] == freqeff[core]);
 			has_c0 |= (c0[core] == c0[core]);
 			has_cc1 |= (cc1[core] == cc1[core]);
@@ -199,8 +240,10 @@ static void show_info_table(ryzen_access ry)
 			if (has_c6) printf("------|");
 			printf("\n");
 
-			for (core = 0; core < 8; core++) {
+			for (core = 0; core < core_count; core++) {
 				if (!(power[core] > 0.0f))
+					continue;
+				if (!info_core_values_valid(power[core], volt[core], temp[core], clk[core]))
 					continue;
 				printf("| %4d | %8.3f | %7.3f | %7.1f | %9.3f |",
 					core, power[core], volt[core], temp[core], clk[core]);
@@ -301,11 +344,11 @@ int main(int argc, const char **argv)
 		OPT_U32('\0', "vrmcvip-current", &vrmcvip_current, "VRM CVIP Current Limit - TDC LIMIT CVIP (mA)"),
 		OPT_U32('k', "vrmmax-current", &vrmmax_current, "VRM Maximum Current Limit     - EDC LIMIT VDD (mA)"),
 		OPT_U32('l', "vrmsocmax-current", &vrmsocmax_current, "VRM SoC Maximum Current Limit - EDC LIMIT SoC (mA)"),
-		OPT_U32('\0', "vrmgfxmax_current", &vrmgfxmax_current, "VRM GFX Maximum Current Limit - EDC LIMIT GFX (mA)"),
+		OPT_U32('\0', "vrmgfxmax-current", &vrmgfxmax_current, "VRM GFX Maximum Current Limit - EDC LIMIT GFX (mA)"),
 		OPT_U32('m', "psi0-current", &psi0_current, "PSI0 VDD Current Limit (mA)"),
-		OPT_U32('\0', "psi3cpu_current", &psi3cpu_current, "PSI3 CPU Current Limit (mA)"),
+		OPT_U32('\0', "psi3cpu-current", &psi3cpu_current, "PSI3 CPU Current Limit (mA)"),
 		OPT_U32('n', "psi0soc-current", &psi0soc_current, "PSI0 SoC Current Limit (mA)"),
-		OPT_U32('\0', "psi3gfx_current", &psi3gfx_current, "PSI3 GFX Current Limit (mA)"),
+		OPT_U32('\0', "psi3gfx-current", &psi3gfx_current, "PSI3 GFX Current Limit (mA)"),
 		OPT_U32('o', "max-socclk-frequency", &max_socclk_freq, "Maximum SoC Clock Frequency (MHz)"),
 		OPT_U32('p', "min-socclk-frequency", &min_socclk_freq, "Minimum SoC Clock Frequency (MHz)"),
 		OPT_U32('q', "max-fclk-frequency", &max_fclk_freq, "Maximum Transmission (CPU-GPU) Frequency (MHz)"),

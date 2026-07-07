@@ -31,6 +31,7 @@ enum ryzen_family {
         FAM_STRIXPOINT,
         FAM_STRIXHALO,
         FAM_FIRERANGE,
+        FAM_MATISSE,
         FAM_END
 };
 
@@ -172,7 +173,14 @@ EXP float CALL get_gfx_temp(ryzen_access ry);
 EXP float CALL get_gfx_volt(ryzen_access ry);
 
 EXP float CALL get_mem_clk(ryzen_access ry);
+EXP float CALL get_uclk(ryzen_access ry);
 EXP float CALL get_fclk(ryzen_access ry);
+EXP float CALL get_mem_phy_clk(ryzen_access ry);
+EXP float CALL get_mem_transfer_rate(ryzen_access ry);
+EXP float CALL get_vclk(ryzen_access ry);
+EXP float CALL get_socclk(ryzen_access ry);
+EXP float CALL get_mpipu_clk(ryzen_access ry);
+EXP float CALL get_ipu_clk(ryzen_access ry);
 
 EXP float CALL get_soc_power(ryzen_access ry);
 EXP float CALL get_soc_volt(ryzen_access ry);

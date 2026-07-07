@@ -61,6 +61,8 @@ static enum ryzen_family cpuid_load_family()
             return FAM_RENOIR;
         case 104:
             return FAM_LUCIENNE;
+        case 113:
+            return FAM_MATISSE;
         case 144:
         case 145:
             return FAM_VANGOGH;

@@ -34,14 +34,35 @@ static bool is_ryzen_smu_driver_compatible() {
 
 os_access_obj_t *init_os_access_obj() {
 	struct stat stats;
+	bool kmod_unusable = false;
 
 	if (lstat("/sys/kernel/ryzen_smu_drv", &stats) == 0 && is_ryzen_smu_driver_compatible()) {
+		os_access_obj_t *obj;
 		fprintf(stderr, "detected compatible ryzen_smu kernel module\n");
 		is_smu = true;
-		return init_os_access_obj_kmod();
+		obj = init_os_access_obj_kmod();
+		if (obj)
+			return obj;
+		fprintf(stderr, "compatible ryzen_smu kernel module is unusable, fallback to /dev/mem\n");
+		is_smu = false;
+		kmod_unusable = true;
 	}
 
-	fprintf(stderr, "no compatible ryzen_smu kernel module found, fallback to /dev/mem\n");
+	if (!kmod_unusable) {
+		if (lstat("/sys/module/ryzen_smu", &stats) == 0)
+			fprintf(stderr, "incompatible ryzen_smu kernel module loaded: PM table sysfs interface unavailable\n");
+		else if (lstat("/sys/kernel/ryzen_smu_drv", &stats) == 0)
+			fprintf(stderr, "incompatible ryzen_smu kernel module found, need driver version >= 0.1.7\n");
+	}
+
+	if (lstat("/dev/mem", &stats) == -1) {
+		if (kmod_unusable)
+			fprintf(stderr, "compatible ryzen_smu kernel module is unusable and /dev/mem is unavailable\n");
+		else
+			fprintf(stderr, "no compatible ryzen_smu kernel module found and /dev/mem is unavailable\n");
+	} else if (!kmod_unusable) {
+		fprintf(stderr, "no compatible ryzen_smu kernel module found, fallback to /dev/mem\n");
+	}
 	return init_os_access_obj_mem();
 }
 
