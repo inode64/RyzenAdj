@@ -44,6 +44,7 @@ os_access_obj_t *init_os_access_obj() {
 		if (obj)
 			return obj;
 		fprintf(stderr, "compatible ryzen_smu kernel module is unusable, fallback to /dev/mem\n");
+		fprintf(stderr, "hint: run as root (sudo) or install ryzen_smu with PM table sysfs support\n");
 		is_smu = false;
 		kmod_unusable = true;
 	}
@@ -112,4 +113,12 @@ int compare_pm_table(const void *buffer, const size_t size) {
 
 bool is_using_smu_driver() {
 	return is_smu;
+}
+
+bool kmod_has_pm_table(const os_access_obj_t *obj) {
+	return is_smu && obj->access.kmod.has_pm_table;
+}
+
+bool kmod_smn_writable(const os_access_obj_t *obj) {
+	return is_smu && obj->access.kmod.smn_writable;
 }

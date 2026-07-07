@@ -57,6 +57,8 @@ typedef struct {
 			int pm_table_fd;
 			size_t pm_table_size;
 			uint32_t pm_table_version;
+			bool smn_writable;
+			bool has_pm_table;
 		} kmod;
 	} access;
 #endif
@@ -78,6 +80,8 @@ void free_os_access_obj(os_access_obj_t *obj);
 uint32_t smn_reg_read(const os_access_obj_t *obj, uint32_t addr);
 void smn_reg_write(const os_access_obj_t *obj, uint32_t addr, uint32_t data);
 bool is_using_smu_driver();
+bool kmod_has_pm_table(const os_access_obj_t *obj);
+bool kmod_smn_writable(const os_access_obj_t *obj);
 
 smu_t get_smu(os_access_obj_t *obj, int smu_type);
 uint32_t smu_service_req(smu_t smu, uint32_t id, smu_service_args_t *args);

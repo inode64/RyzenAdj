@@ -180,6 +180,7 @@ static void show_info_table(ryzen_access ry)
 	print_info_value_if_valid(tableFormat, "SOCKET POWER", get_socket_power(ry), "");
 	print_info_value_if_valid(tableFormat, "SOC POWER", get_soc_power(ry), "");
 	print_info_value_if_valid(tableFormat, "SOC VOLT", get_soc_volt(ry), "");
+	print_info_value_if_valid(tableFormat, "GFX POWER", get_gfx_power(ry), "");
 	print_info_value_if_valid(tableFormat, "GFX CLK (MHz)", get_gfx_clk(ry), "");
 	print_info_value_if_valid(tableFormat, "GFX VOLT", get_gfx_volt(ry), "");
 	print_info_value_if_valid(tableFormat, "GFX TEMP", get_gfx_temp(ry), "");
@@ -323,7 +324,7 @@ int main(int argc, const char **argv)
 	uint32_t max_socclk_freq = -1, min_socclk_freq = -1, max_fclk_freq = -1, min_fclk_freq = -1, max_vcn = -1, min_vcn = -1, max_lclk = -1, min_lclk = -1;
 	uint32_t max_gfxclk_freq = -1, min_gfxclk_freq = -1, prochot_deassertion_ramp = -1, apu_skin_temp_limit = -1, dgpu_skin_temp_limit = -1, apu_slow_limit = -1;
 	uint32_t skin_temp_power_limit = -1;
-	uint32_t gfx_clk = -1, oc_clk = -1, oc_volt = -1, coall = -1, coper = -1, cogfx = -1;
+	uint32_t gfx_clk = -1, oc_clk = -1, per_core_oc_clk = -1, oc_volt = -1, coall = -1, coper = -1, cogfx = -1;
 
 	//create structure for parsing
 	struct argparse_option options[] = {
@@ -366,6 +367,7 @@ int main(int argc, const char **argv)
 		OPT_U32('\0', "skin-temp-limit", &skin_temp_power_limit, "Skin Temperature Power Limit (mW)"),
 		OPT_U32('\0', "gfx-clk", &gfx_clk, "Forced Clock Speed MHz (Renoir Only)"),
 		OPT_U32('\0', "oc-clk", &oc_clk, "Forced Core Clock Speed MHz (Renoir and up Only)"),
+		OPT_U32('\0', "oc-clk-per-core", &per_core_oc_clk, "Forced Per Core Clock Speed MHz (Renoir, Cezanne, Rembrandt Only)"),
 		OPT_U32('\0', "oc-volt", &oc_volt, "Forced Core VID: Must follow this calculation (1.55 - [VID you want to set e.g. 1.25 for 1.25v]) / 0.00625 (Renoir and up Only)"),
 		OPT_BOOLEAN('\0', "enable-oc", &enable_oc, "Enable OC (Renoir and up Only)"),
 		OPT_BOOLEAN('\0', "disable-oc", &disable_oc, "Disable OC (Renoir and up Only)"),
@@ -374,7 +376,6 @@ int main(int argc, const char **argv)
 		OPT_U32('\0', "set-cogfx", &cogfx, "iGPU Curve Optimiser"),
 		OPT_BOOLEAN('\0', "power-saving", &power_saving, "Hidden options to improve power efficiency (is set when AC unplugged): behavior depends on CPU generation, Device and Manufacture"),
 		OPT_BOOLEAN('\0', "max-performance", &max_performance, "Hidden options to improve performance (is set when AC plugged in): behavior depends on CPU generation, Device and Manufacture"),
-		OPT_GROUP("P-State Functions"),
 		OPT_END(),
 	};
 
@@ -440,6 +441,7 @@ int main(int argc, const char **argv)
 	_do_adjust(skin_temp_power_limit);
 	_do_adjust(gfx_clk);
 	_do_adjust(oc_clk);
+	_do_adjust(per_core_oc_clk);
 	_do_adjust(oc_volt);
 	_do_enable(power_saving);
 	_do_enable(max_performance);

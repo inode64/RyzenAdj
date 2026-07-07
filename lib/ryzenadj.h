@@ -168,6 +168,7 @@ EXP float CALL get_l3_logic(ryzen_access ry);
 EXP float CALL get_l3_vddm(ryzen_access ry);
 EXP float CALL get_l3_temp(ryzen_access ry);
 
+EXP float CALL get_gfx_power(ryzen_access ry);
 EXP float CALL get_gfx_clk(ryzen_access ry);
 EXP float CALL get_gfx_temp(ryzen_access ry);
 EXP float CALL get_gfx_volt(ryzen_access ry);

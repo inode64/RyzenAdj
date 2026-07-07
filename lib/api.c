@@ -41,9 +41,11 @@ EXP ryzen_access CALL init_ryzenadj() {
 	}
 
 #ifndef _WIN32
-	if (is_using_smu_driver() && family == FAM_MATISSE) {
-		// Matisse desktop systems can expose the PM table through ryzen_smu
-		// sysfs while direct SMN writes are blocked. Keep read-only info working.
+	if (is_using_smu_driver() &&
+	    kmod_has_pm_table(ry->os_access) &&
+	    !kmod_smn_writable(ry->os_access)) {
+		// PM table sysfs can work without SMN write access (e.g. Matisse,
+		// Strix Point with a recent ryzen_smu build).
 		return ry;
 	}
 #endif
@@ -2797,6 +2799,15 @@ EXP float CALL get_core_freqeff(ryzen_access ry, uint32_t core) {
 
 	uint32_t baseOffset;
 	switch (ry->table_ver) {
+		case 0x005D0008: // Strix Point - 12-core arrays, 0x30 stride
+		case 0x005D0009:
+		case 0x005D000B:
+			baseOffset = 0xA94;
+			break;
+		case 0x0064020c: // Strix Halo - 16-core arrays, 0x40 stride
+			baseOffset = 0xC90;
+			break;
+		case 0x00540004: // EPYC 4004 / 16-core Raphael
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x514;
 			break;
@@ -2820,6 +2831,15 @@ EXP float CALL get_core_c0(ryzen_access ry, uint32_t core) {
 
 	uint32_t baseOffset;
 	switch (ry->table_ver) {
+		case 0x005D0008:
+		case 0x005D0009:
+		case 0x005D000B:
+			baseOffset = 0xAB4;
+			break;
+		case 0x0064020c:
+			baseOffset = 0xCD0;
+			break;
+		case 0x00540004:
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x534;
 			break;
@@ -2843,6 +2863,15 @@ EXP float CALL get_core_cc1(ryzen_access ry, uint32_t core) {
 
 	uint32_t baseOffset;
 	switch (ry->table_ver) {
+		case 0x005D0008:
+		case 0x005D0009:
+		case 0x005D000B:
+			baseOffset = 0xAD4;
+			break;
+		case 0x0064020c:
+			baseOffset = 0xD10;
+			break;
+		case 0x00540004:
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x554;
 			break;
@@ -2866,6 +2895,15 @@ EXP float CALL get_core_cc6(ryzen_access ry, uint32_t core) {
 
 	uint32_t baseOffset;
 	switch (ry->table_ver) {
+		case 0x005D0008:
+		case 0x005D0009:
+		case 0x005D000B:
+			baseOffset = 0xAF4;
+			break;
+		case 0x0064020c:
+			baseOffset = 0xD50;
+			break;
+		case 0x00540004:
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x574;
 			break;
@@ -2964,6 +3002,22 @@ EXP float CALL get_l3_temp(ryzen_access ry) {
 	case 0x00400004:
 	case 0x00400005:
 		_read_float_value(0x608); //1544
+	default:
+		break;
+	}
+	return NAN;
+}
+
+EXP float CALL get_gfx_power(ryzen_access ry) {
+	switch (ry->table_ver)
+	{
+	case 0x005D0008:
+	case 0x005D0009:
+	case 0x005D000B:
+		// Strix Point iGPU power (W); rises under FurMark, not memtester.
+		return read_valid_range(ry, 0x4B4, 0.001f, 300.0f);
+	case 0x0064020c:
+		return read_valid_range(ry, 0x54C, 0.001f, 300.0f);
 	default:
 		break;
 	}
