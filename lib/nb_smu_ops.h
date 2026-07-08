@@ -82,6 +82,7 @@ void smn_reg_write(const os_access_obj_t *obj, uint32_t addr, uint32_t data);
 bool is_using_smu_driver();
 bool kmod_has_pm_table(const os_access_obj_t *obj);
 bool kmod_smn_writable(const os_access_obj_t *obj);
+bool pm_table_uses_devmem(const os_access_obj_t *obj);
 
 smu_t get_smu(os_access_obj_t *obj, int smu_type);
 uint32_t smu_service_req(smu_t smu, uint32_t id, smu_service_args_t *args);

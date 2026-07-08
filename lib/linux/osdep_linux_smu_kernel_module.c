@@ -78,7 +78,7 @@ os_access_obj_t *init_os_access_obj_kmod() {
 	if (obj->access.kmod.pm_table_fd == -1) {
 		obj->access.kmod.pm_table_fd = -1;
 		if (!obj->access.kmod.has_pm_table)
-			fprintf(stderr, "ryzen_smu PM table sysfs unavailable (driver >= 0.1.7 with PM support required for monitoring without root)\n");
+			DBG("ryzen_smu PM table sysfs unavailable\n");
 		else
 			DBG("failed to open pm_table fd: %s\n", strerror(errno));
 	} else {

@@ -107,7 +107,9 @@ static int info_core_count(ryzen_access ry)
 			return 8;
 		case 0x005D0008:
 		case 0x005D0009:
+		case 0x005D000A:
 		case 0x005D000B:
+		case 0x00650005:
 		case 0x00650007:
 			return 12;
 		case 0x0064020c:

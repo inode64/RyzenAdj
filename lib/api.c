@@ -222,9 +222,17 @@ static int request_table_ver_and_size(ryzen_access ry) {
 		case 0x4C0009: ry->table_size = 0xB00; break;
 		case 0x5D0008:
 		case 0x5D0009:
+		case 0x5D000A:
 		case 0x5D000B: ry->table_size = 0xD54; break;
+		case 0x540104: ry->table_size = 0x6A8; break;
+		case 0x540105: ry->table_size = 0x6B4; break;
+		case 0x621102:
 		case 0x620105: ry->table_size = 0x724; break;
+		case 0x621202:
 		case 0x620205: ry->table_size = 0x994; break;
+		case 0x650004: ry->table_size = 0xB74; break;
+		case 0x650005: ry->table_size = 0xB78; break;
+		case 0x650006: ry->table_size = 0xB80; break;
 		case 0x650007: ry->table_size = 0xD54; break;
 		case 0x64020c: ry->table_size = 0xE50; break;
 
@@ -371,7 +379,13 @@ EXP int CALL init_table(ryzen_access ry)
 
 	//init memory object because it is prerequiremt to woring with physical memory address
 	if (init_mem_obj(ry->os_access, ry->table_addr) < 0) {
-		printf("Unable to get memory access\n");
+		printf("Unable to get memory access for PM table monitoring\n");
+#ifndef _WIN32
+		if (is_using_smu_driver())
+			printf("hint: install ryzen_smu with PM table sysfs support, or run as root for /dev/mem fallback\n");
+		else
+			printf("hint: run as root (sudo) for /dev/mem access, or load ryzen_smu with PM table support\n");
+#endif
 		return ADJ_ERR_MEMORY_ACCESS;
 	}
 
@@ -451,8 +465,8 @@ EXP int CALL refresh_table(ryzen_access ry)
 	int errorcode = 0;
 	_lazy_init_table(errorcode);
 
-	//only execute request table if we don't use SMU driver
-	if(!is_using_smu_driver()){
+	// Read PM table through /dev/mem when ryzen_smu has no pm_table sysfs export.
+	if(!is_using_smu_driver() || pm_table_uses_devmem(ry->os_access)){
 		//if other tools call tables transfer, we may already find new data inside the memory and can avoid calling transfer table twice
 		//avoiding transfer table twice is important because SMU tend to reject transfer table calls if you repeat them too fast
 		//transfer table rejection happens even if we did correctly wait for response register change
@@ -468,7 +482,16 @@ EXP int CALL refresh_table(ryzen_access ry)
 	}
 
 	if(copy_pm_table(ry->os_access, ry->table_values, ry->table_size)){
+#ifndef _WIN32
+		if (is_using_smu_driver() && pm_table_uses_devmem(ry->os_access))
+			printf("refresh_table failed: ryzen_smu has no PM table sysfs and /dev/mem read failed (run as root)\n");
+		else if (is_using_smu_driver())
+			printf("refresh_table failed: unable to read PM table from ryzen_smu sysfs\n");
+		else
+			printf("refresh_table failed: unable to read PM table via /dev/mem (run as root, check secure boot)\n");
+#else
 		printf("refresh_table failed\n");
+#endif
 		return ADJ_ERR_MEMORY_ACCESS;
 	}
 
@@ -1591,7 +1614,11 @@ EXP float CALL get_stapm_limit(ryzen_access ry){if(ry->table_ver==0x00540104||ry
 EXP float CALL get_stapm_value(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x4);}
 EXP float CALL get_fast_limit(ryzen_access ry){if(ry->table_ver==0x00240903){_read_float_value(0x0);}_read_float_value(0x8);}
 EXP float CALL get_fast_value(ryzen_access ry){if(ry->table_ver==0x00620105){return read_valid_range(ry, 0x458, 0.001f, 1000.0f);}if(ry->table_ver==0x00240903){_read_float_value(0x4);}_read_float_value(0xC);}
-EXP float CALL get_slow_limit(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x10);}
+EXP float CALL get_slow_limit(ryzen_access ry){
+	if(ry->table_ver==0x00620105){return read_valid_range(ry,0x3EC,0.001f,500.0f);}
+	if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;
+	_read_float_value(0x10);
+}
 EXP float CALL get_slow_value(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x14);}
 
 //custom section, offsets are depending on table version
@@ -1600,7 +1627,9 @@ EXP float CALL get_apu_slow_limit(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x18, 0.001f, 500.0f);
 	default:
@@ -1643,7 +1672,9 @@ EXP float CALL get_apu_slow_value(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x1C, 0.001f, 500.0f);
 	default:
@@ -1866,7 +1897,9 @@ EXP float CALL get_vrmmax_current(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return NAN;
 	default:
@@ -1926,7 +1959,9 @@ EXP float CALL get_vrmmax_current_value(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return NAN;
 	default:
@@ -1974,7 +2009,9 @@ EXP float CALL get_vrmsocmax_current(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return NAN;
 	default:
@@ -2018,7 +2055,9 @@ EXP float CALL get_vrmsocmax_current_value(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return NAN;
 	default:
@@ -2190,9 +2229,10 @@ EXP float CALL get_tctl_temp_value(ryzen_access ry) {
 	 */
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
-	case 0x00650005: // Krackan Point
 		_read_float_value(0x44);
 	default:
 		break;
@@ -2204,7 +2244,9 @@ EXP float CALL get_apu_skin_temp_limit(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x58, 20.0f, 130.0f);
 	default:
@@ -2247,7 +2289,9 @@ EXP float CALL get_apu_skin_temp_value(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x5C, 20.0f, 130.0f);
 	default:
@@ -2289,7 +2333,9 @@ EXP float CALL get_dgpu_skin_temp_limit(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x68, 20.0f, 130.0f);
 	default:
@@ -2331,7 +2377,9 @@ EXP float CALL get_dgpu_skin_temp_value(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x6C, 20.0f, 130.0f);
 	default:
@@ -2548,6 +2596,7 @@ EXP float CALL get_stapm_time(ryzen_access ry)
 		_read_float_value(0x918);
 	case 0x005D0008: // Strix Point - calculated from slow time (0x9C0 - 0x4), always 1?
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
 	case 0x00650007:
 		_read_float_value(0x9BC);
@@ -2564,6 +2613,7 @@ EXP float CALL get_slow_time(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
 	case 0x00650007:
 		return read_valid_range(ry, 0x9C0, 0.001f, 10000.0f);
@@ -3137,7 +3187,9 @@ EXP float CALL get_gfx_power(ryzen_access ry) {
 		return read_valid_range(ry, 0x1AC, 0.001f, 300.0f);
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		// Strix Point iGPU power (W); rises under FurMark, not memtester.
 		return read_valid_range(ry, 0x4B4, 0.001f, 300.0f);
@@ -3183,7 +3235,9 @@ EXP float CALL get_gfx_clk(ryzen_access ry) {
 	 */
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		_read_float_value(0x4C0); // 4C0 and 4C4 are always close to each other, but 4C0 seems more correct
 	case 0x0064020c: // Strix Halo
@@ -3199,7 +3253,9 @@ EXP float CALL get_gfx_volt(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		// On the 0x5d000b dump this offset tracks ~46C, not voltage.
 		return NAN;
@@ -3245,7 +3301,9 @@ EXP float CALL get_gfx_temp(ryzen_access ry) {
 		return read_valid_range(ry, 0x188, 1.0f, 130.0f);
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		return read_valid_range(ry, 0x4B8, 1.0f, 130.0f);
 	default:
@@ -3337,7 +3395,9 @@ EXP float CALL get_fclk(ryzen_access ry) {
 	 */
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		_read_float_value(0x4E0);
 	default:
@@ -3574,7 +3634,9 @@ EXP float CALL get_socket_power(ryzen_access ry) {
 	{
 	case 0x005D0008:
 	case 0x005D0009:
+	case 0x005D000A:
 	case 0x005D000B:
+	case 0x00650005:
 	case 0x00650007:
 		// On the 0x5d000b dump 0xD0 matches the CCLK boost setpoint, not socket power.
 		return NAN;
