@@ -108,6 +108,7 @@ static enum ryzen_family cpuid_load_family()
             printf("Fam%xh: unsupported model %d\n", family, model);
             break;
         }
+        break;
 
     default:
         printf("Unsupported family: %xh\n", family);

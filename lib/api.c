@@ -3,6 +3,7 @@
 /* RyzenAdj API */
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "ryzenadj.h"
 #include "math.h"
@@ -10,6 +11,37 @@
 #ifndef _WIN32
 #include <unistd.h>
 #define Sleep(x) usleep((x)*1000)
+#endif
+
+static unsigned int parse_smu_version_parts(unsigned int major, unsigned int minor, unsigned int patch, unsigned int build, int parts)
+{
+	if (major > 0xff || minor > 0xff || patch > 0xff || build > 0xff)
+		return 0;
+	if (parts == 4)
+		return (major << 24) | (minor << 16) | (patch << 8) | build;
+	if (parts == 3)
+		return (major << 16) | (minor << 8) | patch;
+	return 0;
+}
+
+#ifndef _WIN32
+static unsigned int get_smu_version_from_sysfs(void)
+{
+	FILE *version_file = fopen("/sys/kernel/ryzen_smu_drv/version", "r");
+	unsigned int major = 0;
+	unsigned int minor = 0;
+	unsigned int patch = 0;
+	unsigned int build = 0;
+	int parts;
+
+	if (!version_file)
+		return 0;
+
+	parts = fscanf(version_file, "%u.%u.%u.%u", &major, &minor, &patch, &build);
+	fclose(version_file);
+
+	return parse_smu_version_parts(major, minor, patch, build, parts);
+}
 #endif
 
 
@@ -119,10 +151,21 @@ EXP unsigned int get_smu_version(ryzen_access ry)
 	// interface version query (msg 0x3, which returns 0 on desktop Raphael /
 	// Dragon Range), this message works across all platforms. The result is
 	// packed one byte per field: 0x04540400 -> 4.84.4.0.
-	if(!ry->mp1_smu)
+	if(!ry->mp1_smu) {
+#ifndef _WIN32
+		if (is_using_smu_driver())
+			return get_smu_version_from_sysfs();
+#endif
 		return 0;
+	}
 	smu_service_args_t args = {1, 0, 0, 0, 0, 0};
 	smu_service_req(ry->mp1_smu, 0x2, &args);
+	if (!args.arg0) {
+#ifndef _WIN32
+		if (is_using_smu_driver())
+			return get_smu_version_from_sysfs();
+#endif
+	}
 	return args.arg0;
 }
 
@@ -741,9 +784,11 @@ EXP int CALL set_stapm_time(ryzen_access ry, uint32_t value){
 	case FAM_STRIXPOINT:
 	case FAM_STRIXHALO:
 		_do_adjust(0x18);
+		break;
 	case FAM_DRAGONRANGE:
 	case FAM_FIRERANGE:
 		_do_adjust(0x4e);
+		break;
 	default:
 		break;
 	}
@@ -846,6 +891,7 @@ EXP int CALL set_vrmsoc_current(ryzen_access ry, uint32_t value){
 	case FAM_STRIXPOINT:
 	case FAM_STRIXHALO:
 		_do_adjust(0x1b);
+		break;
 	default:
 		break;
 	}
@@ -859,6 +905,7 @@ EXP int CALL set_vrmgfx_current(ryzen_access ry, uint32_t value){
 	{
 	case FAM_VANGOGH:
 		_do_adjust(0x1c);
+		break;
 	default:
 		break;
 	}
@@ -872,6 +919,7 @@ EXP int CALL set_vrmcvip_current(ryzen_access ry, uint32_t value){
 	{
 	case FAM_VANGOGH:
 		_do_adjust(0x1d);
+		break;
 	default:
 		break;
 	}
@@ -921,6 +969,7 @@ EXP int CALL set_vrmgfxmax_current(ryzen_access ry, uint32_t value){
 	{
 	case FAM_VANGOGH:
 		_do_adjust(0x1f);
+		break;
 	default:
 		break;
 	}
@@ -950,6 +999,7 @@ EXP int CALL set_vrmsocmax_current(ryzen_access ry, uint32_t value){
 	case FAM_STRIXPOINT:
 	case FAM_STRIXHALO:
 		_do_adjust(0x1d);
+		break;
 	default:
 		break;
 	}
@@ -970,6 +1020,7 @@ EXP int CALL set_psi0_current(ryzen_access ry, uint32_t value){
 	case FAM_LUCIENNE:
 	case FAM_CEZANNE:
 		_do_adjust(0x1e);
+		break;
 	default:
 		break;
 	}
@@ -983,6 +1034,7 @@ EXP int CALL set_psi3cpu_current(ryzen_access ry, uint32_t value){
 	{
 	case FAM_VANGOGH:
 		_do_adjust(0x20);
+		break;
 	default:
 		break;
 	}
@@ -1003,6 +1055,7 @@ EXP int CALL set_psi0soc_current(ryzen_access ry, uint32_t value){
 	case FAM_LUCIENNE:
 	case FAM_CEZANNE:
 		_do_adjust(0x1f);
+		break;
 	default:
 		break;
 	}
@@ -1016,6 +1069,7 @@ EXP int CALL set_psi3gfx_current(ryzen_access ry, uint32_t value){
 	{
 	case FAM_VANGOGH:
 		_do_adjust(0x21);
+		break;
 	default:
 		break;
 	}
@@ -1212,6 +1266,7 @@ EXP int CALL set_prochot_deassertion_ramp(ryzen_access ry, uint32_t value) {
 	case FAM_STRIXPOINT:
 	case FAM_STRIXHALO:
 		_do_adjust(0x1f);
+		break;
 	default:
 		break;
 	}

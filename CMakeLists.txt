@@ -14,7 +14,7 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
 option(PREFER_STATIC_LINKING "Prefer static linking for the ryzenadj executable" OFF)
 option(ENABLE_IPO "Enable IPO/LTO when supported" ON)
-option(STRIP_X86_ISA_NOTE "Remove x86 GNU property ISA note after linking" OFF)
+option(STRIP_X86_ISA_NOTE "Remove x86 GNU property ISA note after linking" ON)
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 

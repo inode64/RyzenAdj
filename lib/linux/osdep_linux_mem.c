@@ -35,7 +35,6 @@ os_access_obj_t *init_os_access_obj_mem() {
 		goto err_exit;
 	}
 
-	pci_fill_info(obj->access.mem.pci_dev, PCI_FILL_IDENT | PCI_FILL_BASES | PCI_FILL_CLASS);
 	return obj;
 
 err_exit:
