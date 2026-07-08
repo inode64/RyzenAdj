@@ -84,7 +84,7 @@ static const char *family_name(enum ryzen_family fam)
 		case FAM_KRACKANPOINT: return "Krackan Point";
 		case FAM_STRIXPOINT: return "Strix Point";
 		case FAM_STRIXHALO: return "Strix Halo";
-		case FAM_FIRERANGE: return "Fire Range";
+		case FAM_FIRERANGE: return "Granite Ridge / Fire Range";
 		default: break;
 	}
 
@@ -103,9 +103,12 @@ static int info_core_count(ryzen_access ry)
 		case 0x00540004:
 		case 0x00620205:
 			return 16;
+		case 0x00620105:
+			return 8;
 		case 0x005D0008:
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			return 12;
 		case 0x0064020c:
 			return 16;

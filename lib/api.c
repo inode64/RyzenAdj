@@ -223,6 +223,9 @@ static int request_table_ver_and_size(ryzen_access ry) {
 		case 0x5D0008:
 		case 0x5D0009:
 		case 0x5D000B: ry->table_size = 0xD54; break;
+		case 0x620105: ry->table_size = 0x724; break;
+		case 0x620205: ry->table_size = 0x994; break;
+		case 0x650007: ry->table_size = 0xD54; break;
 		case 0x64020c: ry->table_size = 0xE50; break;
 
 		// use a larger size then the largest known table to be able to test real table size of unknown tables
@@ -396,7 +399,7 @@ EXP int CALL init_table(ryzen_access ry)
 	//On the Raphael / Dragon Range 0x540104 table, offset 0x0 is legitimately always
 	//zero, so table_values[0] would flag every init as "empty" and force a needless
 	//retry. Use offset 0x8 (fast PPT limit, nonzero when populated) for it.
-	int table_empty = (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004 || ry->table_ver == 0x00620205)
+	int table_empty = (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004 || ry->table_ver == 0x00620105 || ry->table_ver == 0x00620205)
 		? !ry->table_values[0x8 / 4]
 		: !ry->table_values[0];
 	if(table_empty){
@@ -527,6 +530,24 @@ static float valid_range_or_nan(float value, float min, float max)
 static float read_valid_range(ryzen_access ry, uint32_t offset, float min, float max)
 {
 	return valid_range_or_nan(read_float_value(ry, offset), min, max);
+}
+
+static float read_granite_ridge_hottest_core_temp(ryzen_access ry)
+{
+	float value = NAN;
+	int core;
+
+	if (!ry->table_values)
+		return NAN;
+
+	for (core = 0; core < 8; core++) {
+		float core_temp = ry->table_values[(0x4F4 + (core * 4)) / 4];
+		if (core_temp > 0.0f && core_temp < 130.0f &&
+		    (!(value == value) || core_temp > value))
+			value = core_temp;
+	}
+
+	return value;
 }
 
 
@@ -767,8 +788,10 @@ EXP int CALL set_vrm_current(ryzen_access ry, uint32_t value){
 		_do_adjust(0x1a);
 		break;
 	case FAM_DRAGONRANGE:
-	case FAM_FIRERANGE:
 		_do_adjust(0x3c);
+		break;
+	case FAM_FIRERANGE:
+		_do_adjust(0x3d);
 		break;
 	default:
 		break;
@@ -858,6 +881,10 @@ EXP int CALL set_vrmmax_current(ryzen_access ry, uint32_t value){
 		break;
 	case FAM_VANGOGH:
 		_do_adjust(0x1e);
+		break;
+	case FAM_FIRERANGE:
+		_do_adjust(0x3c);
+		break;
 	default:
 		break;
 	}
@@ -1557,15 +1584,15 @@ EXP int CALL set_cogfx(ryzen_access ry, uint32_t value) {
 
 //PM Table section, offset of first lines are stable across multiple PM Table versions
 // The "stable prefix" below mostly does NOT hold for desktop Raphael / Dragon
-// Range (table 0x540104) and Fire Range (table 0x620205). The fast PPT limit
-// is still at 0x8, while STAPM and slow PPT are not confirmed there; keep them
+// Range (table 0x540104), Granite Ridge (table 0x620105), and Fire Range
+// (table 0x620205). The fast PPT limit is still at 0x8, while STAPM and slow PPT are not confirmed there; keep them
 // hidden until located.
-EXP float CALL get_stapm_limit(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x0);}
-EXP float CALL get_stapm_value(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x4);}
+EXP float CALL get_stapm_limit(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x0);}
+EXP float CALL get_stapm_value(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x4);}
 EXP float CALL get_fast_limit(ryzen_access ry){if(ry->table_ver==0x00240903){_read_float_value(0x0);}_read_float_value(0x8);}
-EXP float CALL get_fast_value(ryzen_access ry){if(ry->table_ver==0x00240903){_read_float_value(0x4);}_read_float_value(0xC);}
-EXP float CALL get_slow_limit(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x10);}
-EXP float CALL get_slow_value(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x14);}
+EXP float CALL get_fast_value(ryzen_access ry){if(ry->table_ver==0x00620105){return read_valid_range(ry, 0x458, 0.001f, 1000.0f);}if(ry->table_ver==0x00240903){_read_float_value(0x4);}_read_float_value(0xC);}
+EXP float CALL get_slow_limit(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x10);}
+EXP float CALL get_slow_value(ryzen_access ry){if(ry->table_ver==0x00540104||ry->table_ver==0x00540004||ry->table_ver==0x00620105||ry->table_ver==0x00620205||ry->table_ver==0x00240903)return NAN;_read_float_value(0x14);}
 
 //custom section, offsets are depending on table version
 EXP float CALL get_apu_slow_limit(ryzen_access ry) {
@@ -1574,6 +1601,7 @@ EXP float CALL get_apu_slow_limit(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x18, 0.001f, 500.0f);
 	default:
 		break;
@@ -1601,6 +1629,7 @@ EXP float CALL get_apu_slow_limit(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - looks correct from dumping table, defaults to 45W
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x0064020c: // StrixHalo - looks correct from dumping table, defaults to 70W
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x18);
@@ -1615,6 +1644,7 @@ EXP float CALL get_apu_slow_value(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x1C, 0.001f, 500.0f);
 	default:
 		break;
@@ -1640,6 +1670,7 @@ EXP float CALL get_apu_slow_value(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - untested, always 0?
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x0064020c: // StrixHalo - untested!
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x1C);
@@ -1660,6 +1691,8 @@ EXP float CALL get_vrm_current(ryzen_access ry) {
 			return value;
 		return NAN;
 	}
+	if (ry->table_ver == 0x00620105)
+		return read_valid_range(ry, 0x28, 0.001f, 500.0f);
 	if (ry->table_ver == 0x00620205)
 		return read_valid_range(ry, 0x20, 0.001f, 500.0f);
 	if (ry->table_ver == 0x00240903)
@@ -1695,6 +1728,7 @@ EXP float CALL get_vrm_current(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - tested, defaults to 70, max 70
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x30);
 	default:
@@ -1705,6 +1739,7 @@ EXP float CALL get_vrm_current(ryzen_access ry) {
 EXP float CALL get_vrm_current_value(ryzen_access ry) {
 	// Raphael / Dragon Range (0x540104): TDC, current pulled from the VDD rail (A)
 	if (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004) { _read_float_value(0x50); }
+	if (ry->table_ver == 0x00620105) { _read_float_value(0x438); }
 	if (ry->table_ver == 0x00620205) { _read_float_value(0x24); }
 	if (ry->table_ver == 0x00240903) { _read_float_value(0xC); }
 	switch (ry->table_ver)
@@ -1738,6 +1773,7 @@ EXP float CALL get_vrm_current_value(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - looks correct from dumping table
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x34);
 	default:
@@ -1777,6 +1813,7 @@ EXP float CALL get_vrmsoc_current(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - tested, defaults to 30, max 30
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x38);
 	default:
@@ -1816,6 +1853,7 @@ EXP float CALL get_vrmsoc_current_value(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - looks correct from dumping table
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x3C);
 	default:
@@ -1829,6 +1867,7 @@ EXP float CALL get_vrmmax_current(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return NAN;
 	default:
 		break;
@@ -1843,6 +1882,8 @@ EXP float CALL get_vrmmax_current(ryzen_access ry) {
 			return value;
 		return NAN;
 	}
+	if (ry->table_ver == 0x00620105)
+		return read_valid_range(ry, 0x20, 0.001f, 500.0f);
 	if (ry->table_ver == 0x00620205)
 		return read_valid_range(ry, 0xFC, 0.001f, 500.0f);
 	if (ry->table_ver == 0x00240903)
@@ -1886,6 +1927,7 @@ EXP float CALL get_vrmmax_current_value(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return NAN;
 	default:
 		break;
@@ -1933,6 +1975,7 @@ EXP float CALL get_vrmsocmax_current(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return NAN;
 	default:
 		break;
@@ -1976,6 +2019,7 @@ EXP float CALL get_vrmsocmax_current_value(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return NAN;
 	default:
 		break;
@@ -2017,6 +2061,7 @@ EXP float CALL get_tctl_temp(ryzen_access ry) {
 	// Raphael / Dragon Range (0x540104): THM limit (Tctl throttle target, C).
 	// Confirmed: constant 80 across dumps while the value at 0x2C rises to ~81
 	// under load and holds there (thermal-limited), i.e. a configured 80C cap.
+	if (ry->table_ver == 0x00620105) { _read_float_value(0x344); }
 	if (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004 || ry->table_ver == 0x00620205) { _read_float_value(0x28); }
 	if (ry->table_ver == 0x00240903) { return NAN; }
 	switch (ry->table_ver)
@@ -2051,6 +2096,7 @@ EXP float CALL get_tctl_temp(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - untested, defaults to 100
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x40);
 	default:
@@ -2060,6 +2106,11 @@ EXP float CALL get_tctl_temp(ryzen_access ry) {
 }
 EXP float CALL get_tctl_temp_value(ryzen_access ry) {
 	// Raphael / Dragon Range (0x540104): CPU control temperature Tctl (C)
+	if (ry->table_ver == 0x00620105) {
+		// Granite Ridge aggregate thermal metrics are encoded; the per-core
+		// block is direct Celsius, so expose the hottest core as THM VALUE.
+		return read_granite_ridge_hottest_core_temp(ry);
+	}
 	if (ry->table_ver == 0x00540004) {
 		// 0x2C and nearby thermal values do not consistently match k10temp Tctl
 		// on EPYC 4584PX, so keep THM VALUE hidden until the control temp is known.
@@ -2140,6 +2191,7 @@ EXP float CALL get_tctl_temp_value(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x00650005: // Krackan Point
 		_read_float_value(0x44);
 	default:
@@ -2153,6 +2205,7 @@ EXP float CALL get_apu_skin_temp_limit(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x58, 20.0f, 130.0f);
 	default:
 		break;
@@ -2180,6 +2233,7 @@ EXP float CALL get_apu_skin_temp_limit(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - untested
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x0064020c: // StrixHalo tested
 		_read_float_value(0x58);
 		break;
@@ -2194,6 +2248,7 @@ EXP float CALL get_apu_skin_temp_value(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x5C, 20.0f, 130.0f);
 	default:
 		break;
@@ -2221,6 +2276,7 @@ EXP float CALL get_apu_skin_temp_value(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - this is gpu_metrics_v3_0.temperature_soc, !=gpu_metrics_v3_0.temperature_skin
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 	case 0x0064020c: // StrixHalo tested
 		_read_float_value(0x5C);
 	default:
@@ -2234,6 +2290,7 @@ EXP float CALL get_dgpu_skin_temp_limit(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x68, 20.0f, 130.0f);
 	default:
 		break;
@@ -2262,6 +2319,7 @@ EXP float CALL get_dgpu_skin_temp_limit(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - tested
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x68);
 	default:
 		break;
@@ -2274,6 +2332,7 @@ EXP float CALL get_dgpu_skin_temp_value(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x6C, 20.0f, 130.0f);
 	default:
 		break;
@@ -2302,6 +2361,7 @@ EXP float CALL get_dgpu_skin_temp_value(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - calculated from corresponding limit + 0x4, 0 on my device due to no dGPU
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x6C);
 	default:
 		break;
@@ -2378,6 +2438,8 @@ EXP float CALL get_psi0soc_current(ryzen_access ry) {
 EXP float CALL get_cclk_setpoint(ryzen_access ry) {
 	switch (ry->table_ver)
 	{
+	case 0x00620105:
+		return read_valid_range(ry, 0x440, 0.001f, 10.0f);
 	case 0x001E0001:
 	case 0x001E0002:
 	case 0x001E0003:
@@ -2402,6 +2464,7 @@ EXP float CALL get_cclk_setpoint(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - first entry of 12-core boost target array, tested
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0xD0);
 	default:
 		break;
@@ -2412,6 +2475,8 @@ EXP float CALL get_cclk_setpoint(ryzen_access ry) {
 EXP float CALL get_cclk_busy_value(ryzen_access ry) {
 	switch (ry->table_ver)
 	{
+	case 0x00620105:
+		return read_valid_range(ry, 0x71C, 0.001f, 10.0f);
 	case 0x001E0001:
 	case 0x001E0002:
 	case 0x001E0003:
@@ -2436,6 +2501,7 @@ EXP float CALL get_cclk_busy_value(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - aggregate busy clock, tested
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0xCC);
 	default:
 		break;
@@ -2483,6 +2549,7 @@ EXP float CALL get_stapm_time(ryzen_access ry)
 	case 0x005D0008: // Strix Point - calculated from slow time (0x9C0 - 0x4), always 1?
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x9BC);
 	case 0x00650005: // Krackan Point, might be incorrect
 		_read_float_value(0x90C);
@@ -2498,6 +2565,7 @@ EXP float CALL get_slow_time(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x9C0, 0.001f, 10000.0f);
 	default:
 		break;
@@ -2584,10 +2652,16 @@ EXP float CALL get_core_power(ryzen_access ry, uint32_t core) {
 		case 0x005D0008: // Strix Point - 12-core arrays start at 0x9D4 on 0x5d000b
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0x9D4;
 			break;
 		case 0x0064020c: // Strix Halo
 			baseOffset = 0xB90;
+			break;
+		case 0x00620105: // Granite Ridge, 8-entry CCD layout
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x534;
 			break;
 		case 0x00540004: // EPYC 4004 / 16-core Raphael, 16 core entries
 			baseOffset = 0x494;
@@ -2644,10 +2718,16 @@ EXP float CALL get_core_volt(ryzen_access ry, uint32_t core) {
 		case 0x005D0008: // Strix Point - 12-core arrays start at 0xA04 on 0x5d000b
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xA04;
 			break;
 		case 0x0064020c: // Strix Halo
 			baseOffset = 0xBD0;
+			break;
+		case 0x00620105: // Granite Ridge
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x4D4;
 			break;
 		case 0x00540004: // EPYC 4004 / 16-core Raphael
 			baseOffset = 0x4D4;
@@ -2704,10 +2784,16 @@ EXP float CALL get_core_temp(ryzen_access ry, uint32_t core) {
 		case 0x005D0008: // Strix Point - 12-core arrays start at 0xA34 on 0x5d000b
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xA34;
 			break;
 		case 0x0064020c: // Strix Halo
 			baseOffset = 0xC10;
+			break;
+		case 0x00620105: // Granite Ridge
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x4F4;
 			break;
 		case 0x00540004: // EPYC 4004 / 16-core Raphael
 			baseOffset = 0x514;
@@ -2767,10 +2853,16 @@ EXP float CALL get_core_clk(ryzen_access ry, uint32_t core) {
 		case 0x005D0008: // Strix Point - 12-core arrays start at 0xA64 on 0x5d000b
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xA64;
 			break;
 		case 0x0064020c:
 			baseOffset = 0xc50;
+			break;
+		case 0x00620105: // Granite Ridge
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x514;
 			break;
 		case 0x00540004: // EPYC 4004 / 16-core Raphael
 			baseOffset = 0x554;
@@ -2802,12 +2894,15 @@ EXP float CALL get_core_freqeff(ryzen_access ry, uint32_t core) {
 		case 0x005D0008: // Strix Point - 12-core arrays, 0x30 stride
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xA94;
 			break;
 		case 0x0064020c: // Strix Halo - 16-core arrays, 0x40 stride
 			baseOffset = 0xC90;
 			break;
 		case 0x00540004: // EPYC 4004 / 16-core Raphael
+			baseOffset = 0x594;
+			break;
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x514;
 			break;
@@ -2834,12 +2929,20 @@ EXP float CALL get_core_c0(ryzen_access ry, uint32_t core) {
 		case 0x005D0008:
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xAB4;
 			break;
 		case 0x0064020c:
 			baseOffset = 0xCD0;
 			break;
+		case 0x00620105:
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x594;
+			break;
 		case 0x00540004:
+			baseOffset = 0x5D4;
+			break;
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x534;
 			break;
@@ -2866,12 +2969,20 @@ EXP float CALL get_core_cc1(ryzen_access ry, uint32_t core) {
 		case 0x005D0008:
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xAD4;
 			break;
 		case 0x0064020c:
 			baseOffset = 0xD10;
 			break;
+		case 0x00620105:
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x5B4;
+			break;
 		case 0x00540004:
+			baseOffset = 0x614;
+			break;
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x554;
 			break;
@@ -2898,12 +3009,20 @@ EXP float CALL get_core_cc6(ryzen_access ry, uint32_t core) {
 		case 0x005D0008:
 		case 0x005D0009:
 		case 0x005D000B:
+		case 0x00650007:
 			baseOffset = 0xAF4;
 			break;
 		case 0x0064020c:
 			baseOffset = 0xD50;
 			break;
+		case 0x00620105:
+			if (core >= 8)
+				return NAN;
+			baseOffset = 0x574;
+			break;
 		case 0x00540004:
+			baseOffset = 0x654;
+			break;
 		case 0x00540104: // Raphael / Dragon Range desktop (Ryzen 7000)
 			baseOffset = 0x574;
 			break;
@@ -2987,6 +3106,9 @@ EXP float CALL get_l3_vddm(ryzen_access ry) {
 }
 
 EXP float CALL get_l3_temp(ryzen_access ry) {
+	if (ry->table_ver == 0x00620105)
+		return read_valid_range(ry, 0x4A8, 1.0f, 130.0f);
+
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -3011,9 +3133,12 @@ EXP float CALL get_l3_temp(ryzen_access ry) {
 EXP float CALL get_gfx_power(ryzen_access ry) {
 	switch (ry->table_ver)
 	{
+	case 0x00620105:
+		return read_valid_range(ry, 0x1AC, 0.001f, 300.0f);
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		// Strix Point iGPU power (W); rises under FurMark, not memtester.
 		return read_valid_range(ry, 0x4B4, 0.001f, 300.0f);
 	case 0x0064020c:
@@ -3028,6 +3153,7 @@ EXP float CALL get_gfx_clk(ryzen_access ry) {
 	if (ry->table_ver == 0x001E0004) { _read_float_value(0x2DC); }
 	// Raphael / Dragon Range iGPU clock, matches amdgpu hwmon freq1_input.
 	if (ry->table_ver == 0x00540104) { return read_valid_range(ry, 0x190, 1.0f, 10000.0f); }
+	if (ry->table_ver == 0x00620105) { return read_valid_range(ry, 0x1B0, 1.0f, 10000.0f); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -3058,6 +3184,7 @@ EXP float CALL get_gfx_clk(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x4C0); // 4C0 and 4C4 are always close to each other, but 4C0 seems more correct
 	case 0x0064020c: // Strix Halo
 		_read_float_value(0x558);
@@ -3073,6 +3200,7 @@ EXP float CALL get_gfx_volt(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		// On the 0x5d000b dump this offset tracks ~46C, not voltage.
 		return NAN;
 	default:
@@ -3118,6 +3246,7 @@ EXP float CALL get_gfx_temp(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x4B8, 1.0f, 130.0f);
 	default:
 		break;
@@ -3146,6 +3275,7 @@ EXP float CALL get_gfx_temp(ryzen_access ry) {
 	case 0x005D0008: // Strix Point
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x4C8);
 	case 0x0064020c: // Strix Halo
 		_read_float_value(0x550);
@@ -3158,6 +3288,7 @@ EXP float CALL get_gfx_temp(ryzen_access ry) {
 EXP float CALL get_fclk(ryzen_access ry) {
 	// Raphael / Dragon Range (0x540104): Infinity Fabric clock (MHz)
 	if (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004) { _read_float_value(0x1A4); }
+	if (ry->table_ver == 0x00620105) { return read_valid_range(ry, 0x11C, 1.0f, 10000.0f); }
 	if (ry->table_ver == 0x00620205) { return read_valid_range(ry, 0x1C4, 1.0f, 10000.0f); }
 	if (ry->table_ver == 0x00240903) { return read_valid_range(ry, 0xC0, 1.0f, 10000.0f); }
 	switch (ry->table_ver)
@@ -3207,6 +3338,7 @@ EXP float CALL get_fclk(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x4E0);
 	default:
 		break;
@@ -3217,6 +3349,7 @@ EXP float CALL get_fclk(ryzen_access ry) {
 EXP float CALL get_mem_clk(ryzen_access ry) {
 	// Raphael / Dragon Range (0x540104): memory clock (MHz)
 	if (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004) { _read_float_value(0x1D4); }
+	if (ry->table_ver == 0x00620105) { _read_float_value(0x13C); }
 	if (ry->table_ver == 0x001E0004) { _read_float_value(0x298); }
 	switch (ry->table_ver)
 	{
@@ -3236,6 +3369,7 @@ EXP float CALL get_mem_clk(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - UCLK/controller clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		_read_float_value(0x4E4);
 	default:
 		break;
@@ -3248,11 +3382,14 @@ EXP float CALL get_uclk(ryzen_access ry) {
 	{
 	case 0x00240903: // Matisse desktop - memory controller clock
 		return read_valid_range(ry, 0xC4, 1.0f, 10000.0f);
+	case 0x00620105: // Granite Ridge - memory controller clock
+		return read_valid_range(ry, 0x12C, 1.0f, 10000.0f);
 	case 0x00620205: // Fire Range - memory controller clock
 		return read_valid_range(ry, 0x1C8, 1.0f, 10000.0f);
 	case 0x005D0008: // Strix Point - UCLK/controller clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x4E4, 1.0f, 10000.0f);
 	default:
 		break;
@@ -3270,6 +3407,7 @@ EXP float CALL get_mem_phy_clk(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - memory PHY clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x4E8, 1.0f, 10000.0f);
 	default:
 		break;
@@ -3292,9 +3430,16 @@ EXP float CALL get_mem_transfer_rate(ryzen_access ry) {
 			return phy * 2.0f;
 		return NAN;
 	}
+	case 0x00620105: { // Granite Ridge - DDR transfer rate from memory clock
+		float mem = get_mem_clk(ry);
+		if (mem == mem)
+			return mem * 2.0f;
+		return NAN;
+	}
 	case 0x005D0008: // Strix Point - LPDDR transfer rate (MT/s), see get_fclk()
 	case 0x005D0009:
-	case 0x005D000B: {
+	case 0x005D000B:
+	case 0x00650007: {
 		float raw = read_float_value(ry, 0x4EC);
 		float phy = get_mem_phy_clk(ry);
 
@@ -3316,6 +3461,7 @@ EXP float CALL get_vclk(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - VCN clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x4F0, 1.0f, 10000.0f);
 	default:
 		break;
@@ -3329,6 +3475,7 @@ EXP float CALL get_socclk(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - SoC clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x4F8, 1.0f, 10000.0f);
 	default:
 		break;
@@ -3342,6 +3489,7 @@ EXP float CALL get_mpipu_clk(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - MPIPU clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x50C, 1.0f, 10000.0f);
 	default:
 		break;
@@ -3355,6 +3503,7 @@ EXP float CALL get_ipu_clk(ryzen_access ry) {
 	case 0x005D0008: // Strix Point - IPU clock, see get_fclk()
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		return read_valid_range(ry, 0x510, 1.0f, 10000.0f);
 	default:
 		break;
@@ -3367,6 +3516,7 @@ EXP float CALL get_soc_volt(ryzen_access ry) {
 	// effort: this ~1.1V rail is stable idle-vs-load; it may be VDDCR_SOC or the
 	// coupled memory voltage, but the reading is a valid SoC-domain voltage.
 	if (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004) { _read_float_value(0xE0); }
+	if (ry->table_ver == 0x00620105) { return read_valid_range(ry, 0x43C, 0.001f, 2.0f); }
 	if (ry->table_ver == 0x00620205) { _read_float_value(0xE8); }
 	if (ry->table_ver == 0x00240903) { _read_float_value(0xB0); }
 	switch (ry->table_ver)
@@ -3392,6 +3542,7 @@ EXP float CALL get_soc_volt(ryzen_access ry) {
 }
 
 EXP float CALL get_soc_power(ryzen_access ry) {
+	if (ry->table_ver == 0x00620105) { return read_valid_range(ry, 0x54, 0.001f, 500.0f); }
 	switch (ry->table_ver)
 	{
 	case 0x00370000:
@@ -3416,6 +3567,7 @@ EXP float CALL get_soc_power(ryzen_access ry) {
 EXP float CALL get_socket_power(ryzen_access ry) {
 	// Raphael / Dragon Range (0x540104): whole-socket power (W)
 	if (ry->table_ver == 0x00540104 || ry->table_ver == 0x00540004) { _read_float_value(0x68); }
+	if (ry->table_ver == 0x00620105) { _read_float_value(0x50); }
 	if (ry->table_ver == 0x00620205) { _read_float_value(0x68); }
 	if (ry->table_ver == 0x00240903) { _read_float_value(0x4); }
 	switch (ry->table_ver)
@@ -3423,6 +3575,7 @@ EXP float CALL get_socket_power(ryzen_access ry) {
 	case 0x005D0008:
 	case 0x005D0009:
 	case 0x005D000B:
+	case 0x00650007:
 		// On the 0x5d000b dump 0xD0 matches the CCLK boost setpoint, not socket power.
 		return NAN;
 	default:
